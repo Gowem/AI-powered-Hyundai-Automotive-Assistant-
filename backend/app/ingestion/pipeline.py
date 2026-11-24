@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, text, update
 
 from app.config import get_settings
 from app.db import SessionLocal
@@ -174,6 +174,22 @@ def schedule(doc_id: uuid.UUID) -> None:
 
 
 async def recover_stuck_documents() -> int:
+    """Re-queue documents interrupted by a restart; drop uploads never confirmed within a day."""
+    async with SessionLocal() as s:
+        stale = list(
+            await s.scalars(
+                select(Document).where(
+                    Document.status == "pending_upload", Document.uploaded_at < func.now() - text("interval '1 day'")
+                )
+            )
+        )
+        for doc in stale:
+            try:
+                await get_storage().delete(doc.storage_path)
+            except Exception:  # noqa: BLE001
+                logger.warning("could not delete stale upload %s", doc.id)
+            await s.delete(doc)
+        await s.commit()
     async with SessionLocal() as s:
         ids = list(await s.scalars(select(Document.id).where(Document.status.in_(("queued", "processing")))))
     for doc_id in ids:

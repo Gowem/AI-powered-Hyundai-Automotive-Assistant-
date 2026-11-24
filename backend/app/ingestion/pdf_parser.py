@@ -71,13 +71,19 @@ def _rect_overlap(a: pymupdf.Rect, b: pymupdf.Rect) -> float:
     return inter.get_area() / max(a.get_area(), 1e-6)
 
 
-def _extract_rows(page: pymupdf.Page, tab: object) -> list[list[object]]:
-    """Read each cell by its bbox (keeps word spacing better than Table.extract())."""
+def _extract_rows(page: pymupdf.Page, tab: object, words: list[tuple]) -> list[list[object]]:
+    """Assign page words to cell bboxes (one text extraction per page; keeps word spacing)."""
     rows: list[list[object]] = []
     for row in getattr(tab, "rows", []):
         cells: list[object] = []
         for bbox in row.cells:
-            cells.append(page.get_textbox(pymupdf.Rect(bbox)) if bbox else None)
+            if not bbox:
+                cells.append(None)
+                continue
+            x0, y0, x1, y1 = bbox
+            inside = [w for w in words if x0 <= (w[0] + w[2]) / 2 <= x1 and y0 <= (w[1] + w[3]) / 2 <= y1]
+            inside.sort(key=lambda w: (w[5], w[6], w[7]))  # block, line, word order
+            cells.append(" ".join(w[4] for w in inside))
         rows.append(cells)
     if not rows:
         rows = tab.extract()  # type: ignore[attr-defined]
@@ -89,9 +95,10 @@ def parse_page(page: pymupdf.Page) -> PageContent:
     table_rects: list[pymupdf.Rect] = []
     try:
         found = page.find_tables()
+        words = page.get_text("words") if found.tables else []
         for tab in found.tables:
             try:
-                md = table_to_markdown(_extract_rows(page, tab))
+                md = table_to_markdown(_extract_rows(page, tab, words))
             except Exception:  # noqa: BLE001 - a broken table must not break the page
                 logger.debug("table extraction failed on page %s", page.number + 1, exc_info=True)
                 continue
