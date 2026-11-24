@@ -1,0 +1,122 @@
+"""Google Gemini provider (google-genai SDK)."""
+
+import asyncio
+import math
+from collections.abc import AsyncIterator
+
+from google import genai
+from google.genai import types
+
+from app.config import Settings
+from app.llm.base import ChatMessage, LLMError
+from app.llm.retry import retrying
+
+EMBED_BATCH = 50
+
+
+def _normalise(vec: list[float]) -> list[float]:
+    # gemini-embedding-001 vectors truncated below 3072 dims are not unit-normalised.
+    norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+    return [x / norm for x in vec]
+
+
+class GeminiProvider:
+    name = "gemini"
+
+    def __init__(self, settings: Settings) -> None:
+        if not settings.GEMINI_API_KEY:
+            raise LLMError("GEMINI_API_KEY is not set")
+        self.client = genai.Client(
+            api_key=settings.GEMINI_API_KEY,
+            http_options=types.HttpOptions(timeout=settings.LLM_TIMEOUT_SECONDS * 1000),
+        )
+        self.chat_model = settings.GEMINI_CHAT_MODEL
+        self.embed_model = settings.GEMINI_EMBED_MODEL
+        self.dim = settings.EMBEDDING_DIM
+        self.timeout = settings.LLM_TIMEOUT_SECONDS
+
+    async def _embed(self, texts: list[str], task: str) -> list[list[float]]:
+        out: list[list[float]] = []
+        for i in range(0, len(texts), EMBED_BATCH):
+            batch = texts[i : i + EMBED_BATCH]
+            async for attempt in retrying(5):
+                with attempt:
+                    resp = await self.client.aio.models.embed_content(
+                        model=self.embed_model,
+                        contents=batch,  # type: ignore[arg-type]
+                        config=types.EmbedContentConfig(task_type=task, output_dimensionality=self.dim),
+                    )
+            embs = resp.embeddings or []
+            if len(embs) != len(batch):
+                raise LLMError("Embedding count mismatch from Gemini")
+            for e in embs:
+                values = list(e.values or [])
+                if len(values) != self.dim:
+                    raise LLMError(f"Embedding dimension {len(values)} != {self.dim}")
+                out.append(_normalise(values))
+        return out
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return await self._embed(texts, "RETRIEVAL_DOCUMENT")
+
+    async def embed_query(self, text: str) -> list[float]:
+        return (await self._embed([text], "RETRIEVAL_QUERY"))[0]
+
+    async def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        return await self._embed(texts, "RETRIEVAL_QUERY")
+
+    @staticmethod
+    def _contents(messages: list[ChatMessage]) -> list[types.Content]:
+        return [
+            types.Content(role="user" if m.role == "user" else "model", parts=[types.Part(text=m.content)])
+            for m in messages
+        ]
+
+    async def chat(
+        self, system: str, messages: list[ChatMessage], *, json_mode: bool = False, temperature: float = 0.2
+    ) -> str:
+        config = types.GenerateContentConfig(
+            system_instruction=system,
+            temperature=temperature,
+            response_mime_type="application/json" if json_mode else None,
+        )
+        async for attempt in retrying(3):
+            with attempt:
+                resp = await asyncio.wait_for(
+                    self.client.aio.models.generate_content(
+                        model=self.chat_model, contents=self._contents(messages), config=config
+                    ),
+                    timeout=self.timeout,
+                )
+        return resp.text or ""
+
+    async def chat_stream(
+        self, system: str, messages: list[ChatMessage], *, temperature: float = 0.2
+    ) -> AsyncIterator[str]:
+        config = types.GenerateContentConfig(system_instruction=system, temperature=temperature)
+        stream = None
+        async for attempt in retrying(3):
+            with attempt:
+                stream = await asyncio.wait_for(
+                    self.client.aio.models.generate_content_stream(
+                        model=self.chat_model, contents=self._contents(messages), config=config
+                    ),
+                    timeout=self.timeout,
+                )
+        assert stream is not None
+        async for chunk in stream:
+            if chunk.text:
+                yield chunk.text
+
+    async def transcribe_image(self, png_bytes: bytes, prompt: str) -> str:
+        async for attempt in retrying(3):
+            with attempt:
+                resp = await asyncio.wait_for(
+                    self.client.aio.models.generate_content(
+                        model=self.chat_model,
+                        contents=[types.Part.from_bytes(data=png_bytes, mime_type="image/png"), prompt],
+                        config=types.GenerateContentConfig(temperature=0.0),
+                    ),
+                    timeout=self.timeout * 2,
+                )
+        return resp.text or ""
