@@ -40,6 +40,8 @@ Next.js 15 (App Router, TypeScript strict, Tailwind CSS 4, shadcn/ui, TanStack Q
 remark-gfm) · FastAPI on Python 3.12 · SQLAlchemy 2 (async) + Alembic · PostgreSQL + pgvector
 (Supabase) · Supabase Storage · Google Gemini (OpenAI switchable) · Render.
 
+For a full write-up of the project (what was built, the stack, the build story and performance) see **[docs/PROJECT_SUMMARY.md](docs/PROJECT_SUMMARY.md)**.
+
 See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the diagram and both pipelines, and
 **[docs/DECISIONS.md](docs/DECISIONS.md)** for design decisions and deviations from the plan.
 
