@@ -1,0 +1,28 @@
+# env / secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+backend/uploads/
+
+# node
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# brochures (never commit)
+*.pdf
+!backend/tests/fixtures/*.pdf
+
+# misc
+.DS_Store
+*.log
