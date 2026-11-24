@@ -9,7 +9,7 @@ When the brochures don't cover something, it says so instead of guessing.
 
 | | |
 |---|---|
-| **Live demo** | _LIVE_URL_ |
+| **Live demo** | https://hyundai-assistant.onrender.com (API: https://hyundai-assistant-api.onrender.com/api/health) |
 | **Demo login** | `demo@hyundai-assistant.app` / `Demo1234` (or create your own account) |
 | **Demo video** | _VIDEO_URL_ |
 
