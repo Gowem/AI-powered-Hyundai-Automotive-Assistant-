@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     LLM_PROVIDER: Literal["gemini", "openai", "fake"] = "gemini"
     GEMINI_API_KEY: str = ""
-    GEMINI_CHAT_MODEL: str = "gemini-flash-latest"
+    GEMINI_CHAT_MODEL: str = "gemini-3.8-flash"
     GEMINI_EMBED_MODEL: str = "gemini-embedding-001"
     OPENAI_API_KEY: str = ""
     OPENAI_CHAT_MODEL: str = "gpt-4o-mini"

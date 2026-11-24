@@ -26,7 +26,7 @@ services:
       - key: LLM_PROVIDER
         value: gemini
       - key: GEMINI_CHAT_MODEL
-        value: gemini-flash-latest
+        value: gemini-3.8-flash
       - key: GEMINI_EMBED_MODEL
         value: gemini-embedding-001
       - key: EMBEDDING_DIM

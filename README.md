@@ -106,7 +106,7 @@ offline with a deterministic stand-in model (useful for trying the UI; answers a
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_BUCKET` | Supabase Storage (backend only) | –, –, `brochures` |
 | `MAX_UPLOAD_MB` | upload limit | `50` |
 | `LLM_PROVIDER` | `gemini`, `openai` or `fake` | `gemini` |
-| `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBED_MODEL` | Gemini settings | –, `gemini-flash-latest`, `gemini-embedding-001` |
+| `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBED_MODEL` | Gemini settings | –, `gemini-3.8-flash`, `gemini-embedding-001` |
 | `OPENAI_API_KEY`, `OPENAI_CHAT_MODEL`, `OPENAI_EMBED_MODEL` | OpenAI alternative | –, `gpt-4o-mini`, `text-embedding-3-small` |
 | `EMBEDDING_DIM` | fixed at 768 (reprocess documents after switching provider) | `768` |
 | `VISION_OCR_FALLBACK` | OCR image-only pages with the LLM | `true` |
