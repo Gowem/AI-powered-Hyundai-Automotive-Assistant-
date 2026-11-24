@@ -35,6 +35,16 @@ class GeminiProvider:
         self.dim = settings.EMBEDDING_DIM
         self.timeout = settings.LLM_TIMEOUT_SECONDS
 
+    async def available_chat_models(self) -> list[str]:
+        """Names of models that support generateContent (logged at startup to validate config)."""
+        names: list[str] = []
+        pager = await self.client.aio.models.list(config={"page_size": 200})
+        async for m in pager:
+            actions = getattr(m, "supported_actions", None) or []
+            if "generateContent" in actions and m.name:
+                names.append(m.name.removeprefix("models/"))
+        return names
+
     async def _embed(self, texts: list[str], task: str) -> list[list[float]]:
         out: list[list[float]] = []
         for i in range(0, len(texts), EMBED_BATCH):

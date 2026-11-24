@@ -33,7 +33,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await recover_stuck_documents()
         except Exception:  # noqa: BLE001 - never block startup
             logger.exception("startup recovery failed")
+        await _check_llm_models()
     yield
+
+
+async def _check_llm_models() -> None:
+    """Log whether the configured Gemini chat model exists, and which Flash models do."""
+    if settings.LLM_PROVIDER != "gemini" or not settings.GEMINI_API_KEY:
+        return
+    try:
+        from app.llm import get_provider
+
+        provider = get_provider()
+        names = await provider.available_chat_models()  # type: ignore[attr-defined]
+        flash = sorted(n for n in names if "flash" in n)
+        level = logging.INFO if settings.GEMINI_CHAT_MODEL in names else logging.ERROR
+        logger.log(
+            level,
+            "configured chat model %s available=%s; flash models: %s",
+            settings.GEMINI_CHAT_MODEL,
+            settings.GEMINI_CHAT_MODEL in names,
+            ", ".join(flash),
+        )
+    except Exception:  # noqa: BLE001 - diagnostics only
+        logger.warning("could not list Gemini models", exc_info=True)
 
 
 app = FastAPI(
