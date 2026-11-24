@@ -5,13 +5,15 @@ upload**, with page-level citations. Sign in, upload official Hyundai PDF brochu
 lists, cross-model and variant comparisons (as Markdown tables), or a recommendation for your needs.
 When the brochures don't cover something, it says so instead of guessing.
 
-![Chat](docs/screenshots/chat-empty-1440.png)
+![Comparison answer on the live site](docs/screenshots/production-comparison.png)
+
+![Documents page on the live site](docs/screenshots/production-documents.png)
 
 | | |
 |---|---|
 | **Live demo** | https://hyundai-assistant.onrender.com (API: https://hyundai-assistant-api.onrender.com/api/health) |
 | **Demo login** | `demo@hyundai-assistant.app` / `Demo1234` (or create your own account) |
-| **Demo video** | _VIDEO_URL_ |
+| **Demo video** | [docs/demo/hyundai-assistant-demo.mp4](docs/demo/hyundai-assistant-demo.mp4) (4.5 min walkthrough recorded on the live site) |
 
 > **Cold start:** the backend runs on Render's free tier and sleeps after 15 minutes idle.
 > The first request can take ~50 seconds; after that it is fast.

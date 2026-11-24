@@ -35,7 +35,7 @@ export function Composer({
 
   const over = value.length > MAX;
   return (
-    <div className="bg-background/95 sticky bottom-0 border-t backdrop-blur supports-[backdrop-filter]:bg-background/80">
+    <div className="bg-background/95 sticky bottom-0 z-20 border-t backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <form
         className="mx-auto w-full max-w-3xl px-3 py-3 sm:px-6"
         onSubmit={(e) => {
