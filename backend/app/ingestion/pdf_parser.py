@@ -2,6 +2,7 @@
 
 import logging
 import re
+import statistics
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -10,6 +11,7 @@ import pymupdf
 logger = logging.getLogger("app.ingestion")
 
 MIN_TEXT_CHARS = 40
+MIN_TABLE_DRAWINGS = 10  # ruled tables need lines; skip table detection on pages without them
 
 
 @dataclass
@@ -64,62 +66,109 @@ def _normalise_text(text: str) -> str:
     return "\n".join(out).strip()
 
 
-def _rect_overlap(a: pymupdf.Rect, b: pymupdf.Rect) -> float:
-    inter = a & b
-    if inter.is_empty:
-        return 0.0
-    return inter.get_area() / max(a.get_area(), 1e-6)
+def _word_gaps(words: list[tuple], x0: float, x1: float) -> list[tuple[float, float]]:
+    """Empty vertical gutters (start, end) between x0 and x1 where no word overlaps."""
+    spans = sorted((w[0], w[2]) for w in words if w[2] > x0 and w[0] < x1)
+    gaps: list[tuple[float, float]] = []
+    cursor = x0
+    for a, b in spans:
+        if a > cursor:
+            gaps.append((cursor, a))
+        cursor = max(cursor, b)
+    if cursor < x1:
+        gaps.append((cursor, x1))
+    return gaps
 
 
-def _extract_rows(page: pymupdf.Page, tab: object, words: list[tuple]) -> list[list[object]]:
-    """Assign page words to cell bboxes (one text extraction per page; keeps word spacing)."""
-    rows: list[list[object]] = []
-    for row in getattr(tab, "rows", []):
-        cells: list[object] = []
-        for bbox in row.cells:
-            if not bbox:
-                cells.append(None)
-                continue
-            x0, y0, x1, y1 = bbox
-            inside = [w for w in words if x0 <= (w[0] + w[2]) / 2 <= x1 and y0 <= (w[1] + w[3]) / 2 <= y1]
-            inside.sort(key=lambda w: (w[5], w[6], w[7]))  # block, line, word order
-            cells.append(" ".join(w[4] for w in inside))
-        rows.append(cells)
-    if not rows:
-        rows = tab.extract()  # type: ignore[attr-defined]
-    return rows
+_PANEL_HEADERS = {"Variant", "Variants", "Items"}
+
+
+def panels(page: pymupdf.Page, words: list[tuple]) -> list[pymupdf.Rect]:
+    """Split pages that hold several side-by-side tables into one clip per table.
+
+    Each spec/feature table starts with a header cell such as "Variant" or "Items"; a cut is made
+    in the empty gutter just left of every such header that is not at the page's left edge.
+    Very wide brochure spreads without such headers are split into equal panels.
+    """
+    r = page.rect
+    gaps = [g for g in _word_gaps(words, r.x0, r.x1) if g[1] - g[0] >= 4]
+    heads = sorted({round(w[0]) for w in words if w[4] in _PANEL_HEADERS and w[1] < r.y0 + r.height * 0.25})
+    cuts: list[float] = []
+    for x in heads:
+        if x < r.x0 + r.width * 0.1 or (cuts and x - cuts[-1] < r.width * 0.08):
+            continue
+        before = [g for g in gaps if g[1] <= x + 1]
+        cuts.append((before[-1][0] + before[-1][1]) / 2 if before else x - 2)
+    if not cuts and r.width >= 1.8 * r.height:
+        n = max(2, round(r.width / (r.height * 0.9)))
+        for k in range(1, n):
+            target = r.x0 + r.width * k / n
+            near = [(g[0] + g[1]) / 2 for g in gaps if abs((g[0] + g[1]) / 2 - target) <= r.width * 0.06]
+            cuts.append(min(near, key=lambda c: abs(c - target)) if near else target)
+    xs = [r.x0, *sorted(cuts), r.x1]
+    return [pymupdf.Rect(xs[i], r.y0, xs[i + 1], r.y1) for i in range(len(xs) - 1) if xs[i + 1] - xs[i] > 20]
+
+
+def layout_rows(words: list[tuple], clip: pymupdf.Rect, gap_factor: float = 1.2) -> list[str]:
+    """Rebuild table rows from word positions: same baseline = same row, wide gap = new cell.
+
+    Brochure spec sheets put row labels outside the ruled cells, so pure line-based table
+    detection loses them; this keeps "Max. power | 84.4 kW (115 PS) | ..." together.
+    """
+    seen: set[tuple[str, int, int]] = set()
+    ws = []
+    for w in words:
+        key = (w[4], round(w[0]), round(w[1]))  # brochures often overprint identical text
+        if clip.x0 <= (w[0] + w[2]) / 2 < clip.x1 and key not in seen:
+            seen.add(key)
+            ws.append(w)
+    ws.sort(key=lambda w: ((w[1] + w[3]) / 2, w[0]))
+    lines: list[dict] = []
+    for w in ws:
+        yc, h = (w[1] + w[3]) / 2, w[3] - w[1]
+        if lines and abs(lines[-1]["y"] - yc) <= max(2.0, 0.35 * h):
+            lines[-1]["w"].append(w)
+        else:
+            lines.append({"y": yc, "w": [w]})
+    out: list[str] = []
+    for ln in lines:
+        row = sorted(ln["w"], key=lambda w: w[0])
+        h = statistics.median([w[3] - w[1] for w in row])
+        cells: list[list[str]] = [[row[0][4]]]
+        for prev, cur in zip(row, row[1:], strict=False):
+            if cur[0] - prev[2] > gap_factor * h:
+                cells.append([cur[4]])
+            else:
+                cells[-1].append(cur[4])
+        out.append(" | ".join(" ".join(c) for c in cells).replace("\u00a0", " "))
+    return out
 
 
 def parse_page(page: pymupdf.Page) -> PageContent:
-    tables_md: list[str] = []
-    table_rects: list[pymupdf.Rect] = []
+    """Body text for normal pages; row-aligned table text for pages with ruled spec tables."""
+    is_table_page = False
     try:
-        found = page.find_tables()
-        words = page.get_text("words") if found.tables else []
-        for tab in found.tables:
-            try:
-                md = table_to_markdown(_extract_rows(page, tab, words))
-            except Exception:  # noqa: BLE001 - a broken table must not break the page
-                logger.debug("table extraction failed on page %s", page.number + 1, exc_info=True)
-                continue
-            if md:
-                tables_md.append(md)
-                table_rects.append(pymupdf.Rect(tab.bbox))
-    except Exception:  # noqa: BLE001
+        # use_layout=False: MuPDF's layout analysis costs ~400 MB per brochure page (OOM on 512 MB hosts).
+        # Detection only decides whether this is a spec-table page; rows are rebuilt by layout_rows().
+        if len(page.get_drawings()) >= MIN_TABLE_DRAWINGS:
+            found = page.find_tables(use_layout=False)
+            is_table_page = any(t.row_count >= 3 and t.col_count >= 2 for t in found.tables)
+    except Exception:  # noqa: BLE001 - table detection is best effort
         logger.debug("find_tables failed on page %s", page.number + 1, exc_info=True)
 
+    if is_table_page:
+        words = page.get_text("words")
+        tables = []
+        for clip in panels(page, words):
+            rows = [r for r in layout_rows(words, clip) if r.strip()]
+            if rows:
+                tables.append("\n".join(rows))
+        chars = sum(len(t) for t in tables)
+        return PageContent(page.number + 1, "", tables, needs_ocr=chars < MIN_TEXT_CHARS)
+
     blocks = page.get_text("blocks", sort=True)
-    parts: list[str] = []
-    for b in blocks:
-        if b[6] != 0:  # image block
-            continue
-        rect = pymupdf.Rect(b[:4])
-        if any(_rect_overlap(rect, tr) > 0.6 for tr in table_rects):
-            continue  # already captured inside a Markdown table
-        parts.append(b[4])
-    text = _normalise_text("\n".join(parts))
-    total_chars = len(text) + sum(len(t) for t in tables_md)
-    return PageContent(page_number=page.number + 1, text=text, tables=tables_md, needs_ocr=total_chars < MIN_TEXT_CHARS)
+    text = _normalise_text("\n".join(b[4] for b in blocks if b[6] == 0))
+    return PageContent(page_number=page.number + 1, text=text, tables=[], needs_ocr=len(text) < MIN_TEXT_CHARS)
 
 
 def parse_pdf(path: str) -> list[PageContent]:
@@ -127,6 +176,7 @@ def parse_pdf(path: str) -> list[PageContent]:
     with pymupdf.open(path) as doc:
         for page in doc:
             pages.append(parse_page(page))
+            pymupdf.TOOLS.store_shrink(100)  # release MuPDF's object cache between pages
     return pages
 
 

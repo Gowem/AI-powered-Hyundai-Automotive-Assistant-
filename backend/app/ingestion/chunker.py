@@ -38,20 +38,32 @@ def context_header(vehicle: str, document_name: str, page: int, section: str) ->
     return f"[Vehicle: {vehicle} | Document: {document_name} | Page {page} | Section: {section}]"
 
 
+def _table_header(lines: list[str]) -> int:
+    """Number of leading lines to repeat in every part of a split table."""
+    if len(lines) > 1 and lines[1].replace(" ", "").startswith("|---"):
+        return 2  # Markdown table: header + separator
+    for i, ln in enumerate(lines[:6]):
+        if ln.count("|") >= 3:  # first multi-cell row (e.g. "Variant | E | EX | ...")
+            return min(i + 2, 5) if i + 1 < len(lines) and lines[i + 1].count("|") < ln.count("|") else i + 1
+    return 1
+
+
 def split_table(md: str, max_tokens: int = MAX_TABLE_TOKENS) -> list[str]:
+    """Split a table by whole rows, repeating its header rows in every part."""
     lines = md.strip().splitlines()
     if count_tokens(md) <= max_tokens or len(lines) <= 3:
         return [md.strip()]
-    header, sep, rows = lines[0], lines[1], lines[2:]
+    n_head = _table_header(lines)
+    header, rows = lines[:n_head], lines[n_head:]
     parts: list[str] = []
     current: list[str] = []
     for row in rows:
-        if current and count_tokens("\n".join([header, sep, *current, row])) > max_tokens:
-            parts.append("\n".join([header, sep, *current]))
+        if current and count_tokens("\n".join([*header, *current, row])) > max_tokens:
+            parts.append("\n".join([*header, *current]))
             current = []
         current.append(row)
     if current:
-        parts.append("\n".join([header, sep, *current]))
+        parts.append("\n".join([*header, *current]))
     return parts
 
 

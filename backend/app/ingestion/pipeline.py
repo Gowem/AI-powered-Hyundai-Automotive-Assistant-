@@ -28,6 +28,8 @@ EMBED_BATCH = 50
 UNKNOWN_MODEL = "Unknown"
 
 _running: set[uuid.UUID] = set()
+# One document at a time keeps peak memory low on small (512 MB) instances.
+_process_lock = asyncio.Semaphore(1)
 _tasks: set[asyncio.Task[None]] = set()
 
 
@@ -80,6 +82,14 @@ async def process_document(doc_id: uuid.UUID) -> None:
         logger.info("document %s already processing", doc_id)
         return
     _running.add(doc_id)
+    try:
+        async with _process_lock:
+            await _process(doc_id)
+    finally:
+        _running.discard(doc_id)
+
+
+async def _process(doc_id: uuid.UUID) -> None:
     settings = get_settings()
     downloaded = None
     try:
@@ -163,7 +173,6 @@ async def process_document(doc_id: uuid.UUID) -> None:
     finally:
         if downloaded:
             downloaded.cleanup()
-        _running.discard(doc_id)
 
 
 def schedule(doc_id: uuid.UUID) -> None:

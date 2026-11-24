@@ -16,17 +16,17 @@ def _parse(data: bytes) -> list[PageContent]:
         os.unlink(path)
 
 
-def test_pdf_tables_become_markdown_and_pages_are_kept() -> None:
+def test_spec_table_rows_keep_labels_and_pages_are_kept() -> None:
     data = make_brochure("Testmodel", default_rows("Testmodel"), ["A fictional paragraph about cabin comfort."])
     pages = clean_pages(_parse(data))
     assert [p.page_number for p in pages] == [1, 2]
-    assert pages[1].tables, "spec table should be detected on page 2"
-    md = pages[1].tables[0]
-    assert md.splitlines()[0].startswith("| Specification")
-    assert md.splitlines()[1].startswith("| ---")
-    assert "111 test-units" in md
-    # table text is not duplicated in body text
-    assert "111 test-units" not in pages[1].text
+    assert pages[1].tables, "spec table page should be detected on page 2"
+    rows = pages[1].tables[0].splitlines()
+    # each row keeps its label next to its values, cells separated by " | "
+    assert "Specification | Testmodel Prestige | Testmodel Signature" in rows
+    assert "Max Power | 111 test-units | 222 test-units" in rows
+    assert pages[1].text == ""  # table page content is not duplicated as body text
+    assert pages[0].tables == [] and "cabin comfort" in pages[0].text
 
     chunks = chunk_pages(pages, "Alcazar", "Alcazar Test Brochure")
     assert {c.page_number for c in chunks} == {1, 2}
@@ -35,6 +35,33 @@ def test_pdf_tables_become_markdown_and_pages_are_kept() -> None:
     for c in chunks:
         assert c.content.startswith(f"[Vehicle: Alcazar | Document: Alcazar Test Brochure | Page {c.page_number} | ")
     assert "Prestige" in table_chunks[0].variants and "Signature" in table_chunks[0].variants
+
+
+def test_side_by_side_tables_are_split_into_panels() -> None:
+    import pymupdf
+
+    from tests.fixtures.make_pdf import draw_table
+
+    doc = pymupdf.open()
+    page = doc.new_page(width=1200, height=600)
+    draw_table(page, 40, 60, [["Variant", "E", "S"], ["Airbags", "2 test", "6 test"], ["ABS", "S", "S"]], col_w=90)
+    draw_table(page, 640, 60, [["Variant", "E", "S"], ["Sunroof", "-", "S"], ["Cruise", "-", "S"]], col_w=90)
+    pages = _parse(doc.tobytes())
+    tables = pages[0].tables
+    assert len(tables) == 2
+    assert "Airbags | 2 test | 6 test" in tables[0] and "Sunroof" not in tables[0]
+    assert "Sunroof | - | S" in tables[1]
+
+
+def test_row_aligned_table_split_repeats_header() -> None:
+    lines = ["Key features", "Variant | E | EX | SX"] + [
+        f"Fictional feature {i} with a long label | S | - | S" for i in range(300)
+    ]
+    parts = split_table("\n".join(lines))
+    assert len(parts) > 1
+    for part in parts:
+        assert part.splitlines()[:2] == lines[:2]
+        assert count_tokens(part) <= MAX_TABLE_TOKENS
 
 
 def test_large_table_split_by_rows_with_repeated_header() -> None:
