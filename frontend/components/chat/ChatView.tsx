@@ -84,6 +84,10 @@ export function ChatView({ conversationId }: { conversationId: string | null }) 
     for await (const ev of readSSE(res, signal)) {
       const data = ev.data as Record<string, unknown>;
       if (ev.event === "status") patchLast({ stage: data.stage as StreamStage });
+      else if (ev.event === "reset") {
+        text = "";
+        patchLast({ content: "", stage: "writing" });
+      }
       else if (ev.event === "token") {
         text += String(data.text ?? "");
         patchLast({ content: text, stage: "writing" });

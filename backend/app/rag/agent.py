@@ -27,7 +27,7 @@ HISTORY_MESSAGES = 6
 
 @dataclass
 class AgentEvent:
-    kind: Literal["status", "token"]
+    kind: Literal["status", "token", "reset"]
     data: dict[str, Any]
 
 
@@ -97,9 +97,19 @@ async def run_agent(
     system = build_system_prompt(plan, retrieval)
     messages = [*history, ChatMessage("user", message)]
     parts: list[str] = []
-    async for token in provider.chat_stream(system, messages):
-        parts.append(token)
-        yield AgentEvent("token", {"text": token})
+    try:
+        async for token in provider.chat_stream(system, messages):
+            parts.append(token)
+            yield AgentEvent("token", {"text": token})
+    except Exception:
+        if not parts:
+            raise
+        # The model failed part-way (e.g. 503 under load). Discard the partial text and regenerate
+        # in one piece; the provider's non-streaming path can still fall back to another model.
+        logger.warning("generation failed mid-stream; regenerating without streaming", exc_info=True)
+        yield AgentEvent("reset", {})
+        parts = [await provider.chat(system, messages)]
+        yield AgentEvent("token", {"text": parts[0]})
     answer = "".join(parts).strip()
     if not answer:
         answer = NO_CONTEXT_MESSAGE
