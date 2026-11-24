@@ -37,6 +37,7 @@ def main() -> int:
     ap.add_argument("--email", required=True)
     ap.add_argument("--password", required=True)
     ap.add_argument("--out", default="-")
+    ap.add_argument("--pause", type=float, default=20.0, help="seconds between questions")
     args = ap.parse_args()
 
     out: list[str] = [
@@ -56,6 +57,7 @@ def main() -> int:
         )
         conv_id = None
         for qid, question, follow_up in QUESTIONS:
+            time.sleep(args.pause)  # realistic pacing; free-tier LLM quotas are per minute
             if not follow_up or conv_id is None:
                 conv_id = c.post("/api/chat/conversations", json={}).json()["id"]
             t0 = time.perf_counter()

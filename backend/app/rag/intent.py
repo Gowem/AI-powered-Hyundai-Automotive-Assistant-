@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from app.config import get_settings
 from app.llm.base import ChatMessage, LLMProvider
 from app.rag.prompts import INTENT_SYSTEM
 from app.vehicles import KNOWN_MODELS, find_variants, find_vehicles, normalise_vehicle
@@ -220,6 +221,8 @@ def finalise_plan(plan: QueryPlan, message: str, history: list[ChatMessage]) -> 
 
 
 async def plan_query(provider: LLMProvider, message: str, history: list[ChatMessage]) -> QueryPlan:
+    if not get_settings().LLM_QUERY_PLANNER:
+        return finalise_plan(heuristic_plan(message, history), message, history)
     convo = "\n".join(f"{m.role.upper()}: {m.content[:600]}" for m in history[-6:])
     prompt = f"CONVERSATION HISTORY:\n{convo or '(none)'}\n\nCURRENT MESSAGE:\n{message}"
     system = INTENT_SYSTEM.replace("{models}", ", ".join(KNOWN_MODELS))

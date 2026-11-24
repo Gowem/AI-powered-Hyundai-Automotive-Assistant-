@@ -15,6 +15,13 @@ class LLMError(Exception):
     """Raised for provider failures that should surface as a readable error."""
 
 
+class LLMBusyError(LLMError):
+    """Every configured model is rate limited or overloaded, or the time budget ran out."""
+
+
+BUSY_MESSAGE = "The AI service is busy right now (the free Gemini tier is rate limited). Please try again in a minute."
+
+
 class LLMProvider(Protocol):
     name: str
 

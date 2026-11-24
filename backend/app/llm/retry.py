@@ -27,18 +27,18 @@ def _status_of(exc: BaseException) -> int | None:
     return code if isinstance(code, int) else None
 
 
-def is_retryable(exc: BaseException) -> bool:
+def is_retryable(exc: BaseException, codes: frozenset[int] | set[int] = RETRYABLE_CODES) -> bool:
     if isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException, httpx.NetworkError, ConnectionError)):
         return True
     code = _status_of(exc)
-    return code in RETRYABLE_CODES
+    return code in codes
 
 
-def retrying(attempts: int = 3) -> AsyncRetrying:
+def retrying(attempts: int = 3, codes: frozenset[int] | set[int] = RETRYABLE_CODES) -> AsyncRetrying:
     return AsyncRetrying(
         stop=stop_after_attempt(attempts),
         wait=wait_exponential_jitter(initial=2, max=30),
-        retry=retry_if_exception(is_retryable),
+        retry=retry_if_exception(lambda e: is_retryable(e, codes)),
         reraise=True,
         before_sleep=before_sleep_log(logger, logging.WARNING),
     )

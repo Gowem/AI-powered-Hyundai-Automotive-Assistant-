@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionLocal, get_db
 from app.llm import get_provider
-from app.llm.base import ChatMessage
+from app.llm.base import BUSY_MESSAGE, ChatMessage, LLMBusyError
 from app.models import Conversation, Message, User
 from app.rag.agent import AgentAnswer, AgentEvent, run_agent
 from app.schemas import (
@@ -190,6 +190,9 @@ async def send_message(
             async for ev in run_agent(db, provider, body.content, history):
                 if isinstance(ev, AgentAnswer):
                     final = ev
+        except LLMBusyError as exc:
+            logger.warning("chat generation failed: LLM busy")
+            raise HTTPException(status_code=503, detail=BUSY_MESSAGE) from exc
         except Exception as exc:
             logger.exception("chat generation failed")
             raise HTTPException(
@@ -225,6 +228,9 @@ async def send_message(
                                 "intent": ev.intent,
                             },
                         )
+        except LLMBusyError:
+            logger.warning("chat stream failed: LLM busy")
+            yield _sse("error", {"message": BUSY_MESSAGE})
         except Exception:
             logger.exception("chat stream failed")
             yield _sse("error", {"message": "The assistant could not generate an answer. Please retry."})

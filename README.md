@@ -5,13 +5,15 @@ upload**, with page-level citations. Sign in, upload official Hyundai PDF brochu
 lists, cross-model and variant comparisons (as Markdown tables), or a recommendation for your needs.
 When the brochures don't cover something, it says so instead of guessing.
 
-![Chat](docs/screenshots/chat-empty-1440.png)
+![Comparison answer on the live site](docs/screenshots/production-comparison.png)
+
+![Documents page on the live site](docs/screenshots/production-documents.png)
 
 | | |
 |---|---|
 | **Live demo** | https://hyundai-assistant.onrender.com (API: https://hyundai-assistant-api.onrender.com/api/health) |
 | **Demo login** | `demo@hyundai-assistant.app` / `Demo1234` (or create your own account) |
-| **Demo video** | _VIDEO_URL_ |
+| **Demo video** | [docs/demo/hyundai-assistant-demo.mp4](docs/demo/hyundai-assistant-demo.mp4) (4.5 min walkthrough recorded on the live site) |
 
 > **Cold start:** the backend runs on Render's free tier and sleeps after 15 minutes idle.
 > The first request can take ~50 seconds; after that it is fast.
@@ -106,7 +108,7 @@ offline with a deterministic stand-in model (useful for trying the UI; answers a
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_BUCKET` | Supabase Storage (backend only) | –, –, `brochures` |
 | `MAX_UPLOAD_MB` | upload limit | `50` |
 | `LLM_PROVIDER` | `gemini`, `openai` or `fake` | `gemini` |
-| `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBED_MODEL` | Gemini settings | –, `gemini-3.8-flash`, `gemini-embedding-001` |
+| `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBED_MODEL` | Gemini settings | –, `gemini-3.5-flash`, `gemini-embedding-001` |
 | `OPENAI_API_KEY`, `OPENAI_CHAT_MODEL`, `OPENAI_EMBED_MODEL` | OpenAI alternative | –, `gpt-4o-mini`, `text-embedding-3-small` |
 | `EMBEDDING_DIM` | fixed at 768 (reprocess documents after switching provider) | `768` |
 | `VISION_OCR_FALLBACK` | OCR image-only pages with the LLM | `true` |

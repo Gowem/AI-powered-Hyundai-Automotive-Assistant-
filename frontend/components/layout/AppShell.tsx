@@ -9,7 +9,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { useMe } from "@/hooks/queries";
 import { ApiError } from "@/lib/api";
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export function AppShell({ children }: { children: React.ReactNode }) {
   const { data, error, isLoading } = useMe();
   const router = useRouter();
 

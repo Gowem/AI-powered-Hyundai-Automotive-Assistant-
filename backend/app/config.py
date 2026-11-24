@@ -28,9 +28,11 @@ class Settings(BaseSettings):
 
     LLM_PROVIDER: Literal["gemini", "openai", "fake"] = "gemini"
     GEMINI_API_KEY: str = ""
-    GEMINI_CHAT_MODEL: str = "gemini-3.8-flash"
+    GEMINI_CHAT_MODEL: str = "gemini-3.5-flash"
     # Tried in order when the chat model is overloaded (503), rate limited (429) or missing (404).
-    GEMINI_FALLBACK_MODELS: str = "gemini-3.7-flash,gemini-3.5-flash,gemini-2.5-flash"
+    GEMINI_FALLBACK_MODELS: str = "gemini-3.1-flash-lite,gemini-3.5-flash-lite"
+    # Model for the JSON query-planning call (small task, separate quota from the answer model).
+    GEMINI_PLANNER_MODEL: str = "gemini-3.1-flash-lite"
     GEMINI_EMBED_MODEL: str = "gemini-embedding-001"
     OPENAI_API_KEY: str = ""
     OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
@@ -39,6 +41,9 @@ class Settings(BaseSettings):
 
     VISION_OCR_FALLBACK: bool = True
     RETRIEVAL_TOP_K: int = 8
+    # true: one JSON-mode LLM call plans each question (falls back to heuristics on failure);
+    # false: heuristic planner only, halving LLM calls (useful on rate-limited free tiers).
+    LLM_QUERY_PLANNER: bool = True
     LLM_TIMEOUT_SECONDS: int = 60
     MAX_MESSAGE_CHARS: int = Field(default=2000)
 

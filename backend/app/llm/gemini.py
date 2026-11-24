@@ -9,10 +9,17 @@ from google import genai
 from google.genai import types
 
 from app.config import Settings
-from app.llm.base import ChatMessage, LLMError
+from app.llm.base import ChatMessage, LLMBusyError, LLMError
 from app.llm.retry import retrying
 
 EMBED_BATCH = 50
+# Chat calls retry only transient server errors; overload (503), quota (429) and missing model (404)
+# switch to the next model at once.
+CHAT_RETRY_CODES = frozenset({500, 502, 504})  # 503 (overloaded) switches model straight away
+FALLBACK_ROUNDS = 2  # if every model is busy, pause and walk the chain once more
+ROUND_PAUSE_SECONDS = 8.0
+CALL_TIMEOUT_SECONDS = 40.0  # a single request; overloaded endpoints sometimes hang instead of failing
+ANSWER_BUDGET_SECONDS = 90.0  # total time across every model and round before giving up
 logger = logging.getLogger("app.llm")
 
 
@@ -33,6 +40,7 @@ class GeminiProvider:
             http_options=types.HttpOptions(timeout=settings.LLM_TIMEOUT_SECONDS * 1000),
         )
         self.chat_model = settings.GEMINI_CHAT_MODEL
+        self.planner_model = settings.GEMINI_PLANNER_MODEL or settings.GEMINI_CHAT_MODEL
         self.fallback_models = [m.strip() for m in settings.GEMINI_FALLBACK_MODELS.split(",") if m.strip()]
         self.embed_model = settings.GEMINI_EMBED_MODEL
         self.dim = settings.EMBEDDING_DIM
@@ -85,8 +93,8 @@ class GeminiProvider:
             for m in messages
         ]
 
-    def _models(self) -> list[str]:
-        return list(dict.fromkeys([self.chat_model, *self.fallback_models]))
+    def _models(self, primary: str | None = None) -> list[str]:
+        return list(dict.fromkeys([primary or self.chat_model, self.chat_model, *self.fallback_models]))
 
     @staticmethod
     def _should_fall_back(exc: BaseException) -> bool:
@@ -94,28 +102,46 @@ class GeminiProvider:
         code = getattr(exc, "code", None)
         return isinstance(exc, asyncio.TimeoutError) or code in (404, 429, 500, 503, 504)
 
-    async def _generate(self, contents: object, config: types.GenerateContentConfig, limit: float) -> str:
+    async def _generate(
+        self, contents: object, config: types.GenerateContentConfig, limit: float, primary: str | None = None
+    ) -> str:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(limit, ANSWER_BUDGET_SECONDS)
         last: BaseException | None = None
-        for model in self._models():
-            try:
-                async for attempt in retrying(2):
-                    with attempt:
-                        resp = await asyncio.wait_for(
-                            self.client.aio.models.generate_content(
-                                model=model,
-                                contents=contents,
-                                config=config,  # type: ignore[arg-type]
-                            ),
-                            timeout=limit,
-                        )
-                return resp.text or ""
-            except Exception as exc:
-                if not self._should_fall_back(exc):
-                    raise
-                logger.warning("Gemini model %s unavailable (%s); trying next model", model, exc.__class__.__name__)
-                last = exc
-        assert last is not None
-        raise last
+        for round_no in range(FALLBACK_ROUNDS):
+            if round_no:
+                if loop.time() + ROUND_PAUSE_SECONDS >= deadline:
+                    break
+                await asyncio.sleep(ROUND_PAUSE_SECONDS)  # every model busy/rate-limited: wait, try the chain again
+            for model in self._models(primary):
+                remaining = deadline - loop.time()
+                if remaining <= 1:
+                    break
+                try:
+                    return await self._generate_once(model, contents, config, min(CALL_TIMEOUT_SECONDS, remaining))
+                except Exception as exc:
+                    if not self._should_fall_back(exc):
+                        raise
+                    logger.warning(
+                        "Gemini model %s unavailable (%s)", model, getattr(exc, "code", exc.__class__.__name__)
+                    )
+                    last = exc
+        raise LLMBusyError("all Gemini models are busy or rate limited") from last
+
+    async def _generate_once(
+        self, model: str, contents: object, config: types.GenerateContentConfig, limit: float
+    ) -> str:
+        async for attempt in retrying(2, CHAT_RETRY_CODES):
+            with attempt:
+                resp = await asyncio.wait_for(
+                    self.client.aio.models.generate_content(
+                        model=model,
+                        contents=contents,  # type: ignore[arg-type]
+                        config=config,
+                    ),
+                    timeout=limit,
+                )
+        return resp.text or ""
 
     async def chat(
         self, system: str, messages: list[ChatMessage], *, json_mode: bool = False, temperature: float = 0.2
@@ -125,46 +151,64 @@ class GeminiProvider:
             temperature=temperature,
             response_mime_type="application/json" if json_mode else None,
         )
-        return await self._generate(self._contents(messages), config, self.timeout)
+        # Structured query planning is a small task: run it on the planner (lite) model, which has its own quota.
+        primary = self.planner_model if json_mode else None
+        return await self._generate(self._contents(messages), config, self.timeout, primary)
 
     async def chat_stream(
         self, system: str, messages: list[ChatMessage], *, temperature: float = 0.2
     ) -> AsyncIterator[str]:
         config = types.GenerateContentConfig(system_instruction=system, temperature=temperature)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + ANSWER_BUDGET_SECONDS
         last: BaseException | None = None
-        for model in self._models():
-            started = False
-            try:
-                async for attempt in retrying(2):
-                    with attempt:
-                        stream = await asyncio.wait_for(
-                            self.client.aio.models.generate_content_stream(
-                                model=model, contents=self._contents(messages), config=config
-                            ),
-                            timeout=self.timeout,
-                        )
-                        iterator = stream.__aiter__()
-                        first = await asyncio.wait_for(iterator.__anext__(), timeout=self.timeout)
-                started = True
-                if first.text:
-                    yield first.text
-                async for chunk in iterator:
-                    if chunk.text:
-                        yield chunk.text
-                return
-            except StopAsyncIteration:
-                return
-            except Exception as exc:
-                if started or not self._should_fall_back(exc):
-                    raise
-                logger.warning("Gemini model %s unavailable (%s); trying next model", model, exc.__class__.__name__)
-                last = exc
-        assert last is not None
-        raise last
+        for round_no in range(FALLBACK_ROUNDS):
+            if round_no:
+                if loop.time() + ROUND_PAUSE_SECONDS >= deadline:
+                    break
+                await asyncio.sleep(ROUND_PAUSE_SECONDS)
+            for model in self._models():
+                remaining = deadline - loop.time()
+                if remaining <= 1:
+                    break
+                call_timeout = min(CALL_TIMEOUT_SECONDS, remaining)
+                started = False
+                try:
+                    async for attempt in retrying(2, CHAT_RETRY_CODES):
+                        with attempt:
+                            stream = await asyncio.wait_for(
+                                self.client.aio.models.generate_content_stream(
+                                    model=model, contents=self._contents(messages), config=config
+                                ),
+                                timeout=call_timeout,
+                            )
+                            iterator = stream.__aiter__()
+                            first = await asyncio.wait_for(iterator.__anext__(), timeout=call_timeout)
+                    started = True
+                    if first.text:
+                        yield first.text
+                    while True:
+                        try:
+                            chunk = await asyncio.wait_for(iterator.__anext__(), timeout=CALL_TIMEOUT_SECONDS)
+                        except StopAsyncIteration:
+                            break
+                        if chunk.text:
+                            yield chunk.text
+                    return
+                except StopAsyncIteration:
+                    return
+                except Exception as exc:
+                    if started or not self._should_fall_back(exc):
+                        raise
+                    logger.warning(
+                        "Gemini model %s unavailable (%s)", model, getattr(exc, "code", exc.__class__.__name__)
+                    )
+                    last = exc
+        raise LLMBusyError("all Gemini models are busy or rate limited") from last
 
     async def transcribe_image(self, png_bytes: bytes, prompt: str) -> str:
         return await self._generate(
             [types.Part.from_bytes(data=png_bytes, mime_type="image/png"), prompt],
             types.GenerateContentConfig(temperature=0.0),
-            self.timeout * 2,
+            60.0,
         )

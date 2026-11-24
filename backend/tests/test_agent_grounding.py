@@ -189,3 +189,39 @@ async def test_chat_endpoint_non_stream_and_stream(client: AsyncClient) -> None:
 
     r = await client.post(f"/api/chat/conversations/{conv['id']}/messages?stream=false", json={"content": "x" * 2001})
     assert r.status_code == 422
+
+
+async def test_heuristic_only_planner_makes_no_llm_call(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from app.rag import intent
+
+    monkeypatch.setattr(intent.get_settings(), "LLM_QUERY_PLANNER", False)
+    p = CountingProvider()
+    plan = await intent.plan_query(p, "Compare Alcazar vs Creta", [])
+    assert plan.intent == "model_comparison" and plan.vehicles == ["Alcazar", "Creta"]
+    assert p.chat_calls == []
+
+
+class FlakyStreamProvider(CountingProvider):
+    def chat_stream(self, system, messages, *, temperature=0.2):  # type: ignore[no-untyped-def]
+        async def gen():  # type: ignore[no-untyped-def]
+            yield "partial "
+            raise RuntimeError("503 mid-stream")
+
+        return gen()
+
+    async def chat(self, system, messages, *, json_mode=False, temperature=0.2):  # type: ignore[no-untyped-def]
+        if json_mode:
+            return "{}"
+        return "Recovered answer [1]"
+
+
+async def test_mid_stream_failure_is_regenerated() -> None:
+    await _seed_alcazar()
+    p = FlakyStreamProvider()
+    events = []
+    async with SessionLocal() as db:
+        async for ev in run_agent(db, p, "What safety features does the Alcazar have?", []):
+            events.append(ev)
+    kinds = [getattr(e, "kind", "answer") for e in events]
+    assert "reset" in kinds and kinds.index("reset") > kinds.index("token")
+    assert events[-1].content == "Recovered answer [1]" and events[-1].sources
