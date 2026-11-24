@@ -53,7 +53,7 @@ def _fast_retries(monkeypatch):  # type: ignore[no-untyped-def]
 
     import app.llm.gemini as g
 
-    monkeypatch.setattr(g, "retrying", lambda n: AsyncRetrying(stop=stop_after_attempt(1), reraise=True))
+    monkeypatch.setattr(g, "retrying", lambda n, codes=None: AsyncRetrying(stop=stop_after_attempt(1), reraise=True))
 
 
 async def test_chat_falls_back_when_model_overloaded() -> None:

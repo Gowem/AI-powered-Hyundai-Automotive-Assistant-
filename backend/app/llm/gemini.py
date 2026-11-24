@@ -13,6 +13,8 @@ from app.llm.base import ChatMessage, LLMError
 from app.llm.retry import retrying
 
 EMBED_BATCH = 50
+# Chat calls retry only transient server errors; quota (429) / missing model (404) switch model at once.
+CHAT_RETRY_CODES = frozenset({500, 502, 503, 504})
 logger = logging.getLogger("app.llm")
 
 
@@ -98,7 +100,7 @@ class GeminiProvider:
         last: BaseException | None = None
         for model in self._models():
             try:
-                async for attempt in retrying(2):
+                async for attempt in retrying(2, CHAT_RETRY_CODES):
                     with attempt:
                         resp = await asyncio.wait_for(
                             self.client.aio.models.generate_content(
@@ -135,7 +137,7 @@ class GeminiProvider:
         for model in self._models():
             started = False
             try:
-                async for attempt in retrying(2):
+                async for attempt in retrying(2, CHAT_RETRY_CODES):
                     with attempt:
                         stream = await asyncio.wait_for(
                             self.client.aio.models.generate_content_stream(

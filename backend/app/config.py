@@ -28,9 +28,9 @@ class Settings(BaseSettings):
 
     LLM_PROVIDER: Literal["gemini", "openai", "fake"] = "gemini"
     GEMINI_API_KEY: str = ""
-    GEMINI_CHAT_MODEL: str = "gemini-3.8-flash"
+    GEMINI_CHAT_MODEL: str = "gemini-3.5-flash"
     # Tried in order when the chat model is overloaded (503), rate limited (429) or missing (404).
-    GEMINI_FALLBACK_MODELS: str = "gemini-3.7-flash,gemini-3.5-flash,gemini-2.5-flash"
+    GEMINI_FALLBACK_MODELS: str = "gemini-2.5-flash,gemini-3.5-flash-lite"
     GEMINI_EMBED_MODEL: str = "gemini-embedding-001"
     OPENAI_API_KEY: str = ""
     OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
