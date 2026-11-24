@@ -93,7 +93,8 @@ export function ChatView({ conversationId }: { conversationId: string | null }) 
         patchLast({ content: text, stage: "writing" });
       } else if (ev.event === "sources") sources = (data.sources as Source[]) ?? [];
       else if (ev.event === "done") done = data as unknown as Done;
-      else if (ev.event === "error") throw new ApiError(500, String(data.message ?? "Generation failed"));
+      // A server-reported error is final (e.g. LLM busy); only transport failures fall back to ?stream=false.
+      else if (ev.event === "error") throw new ApiError(503, String(data.message ?? "Generation failed"));
     }
     if (!done) throw new Error("stream-incomplete");
     return { done, sources };

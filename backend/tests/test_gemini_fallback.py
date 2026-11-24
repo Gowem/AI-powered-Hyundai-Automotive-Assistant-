@@ -1,6 +1,9 @@
+import asyncio
+
 import pytest
 
 from app.config import get_settings
+from app.llm.base import LLMBusyError
 from app.llm.gemini import GeminiProvider
 
 
@@ -92,6 +95,23 @@ async def test_planner_model_used_for_json_and_rounds_retry() -> None:
     assert models.calls == ["planner"]
 
     models2 = _Models({"planner", "primary", "second", "third"})
-    with pytest.raises(_Err):
+    with pytest.raises(LLMBusyError):
         await _provider(models2).chat("sys", [], json_mode=True)
     assert models2.calls == ["planner", "primary", "second", "third"] * 2
+
+
+async def test_hanging_model_hits_time_budget(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import app.llm.gemini as g
+
+    monkeypatch.setattr(g, "CALL_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(g, "ANSWER_BUDGET_SECONDS", 0.3)
+
+    class Hanging(_Models):
+        async def generate_content(self, model, contents, config):  # type: ignore[no-untyped-def]
+            self.calls.append(model)
+            await asyncio.sleep(10)
+
+    p = _provider(Hanging(set()))
+    p.timeout = 0  # type: ignore[assignment]
+    with pytest.raises(LLMBusyError):
+        await asyncio.wait_for(p.chat("sys", []), timeout=5)
