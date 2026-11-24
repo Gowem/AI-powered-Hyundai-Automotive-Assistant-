@@ -189,3 +189,13 @@ async def test_chat_endpoint_non_stream_and_stream(client: AsyncClient) -> None:
 
     r = await client.post(f"/api/chat/conversations/{conv['id']}/messages?stream=false", json={"content": "x" * 2001})
     assert r.status_code == 422
+
+
+async def test_heuristic_only_planner_makes_no_llm_call(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from app.rag import intent
+
+    monkeypatch.setattr(intent.get_settings(), "LLM_QUERY_PLANNER", False)
+    p = CountingProvider()
+    plan = await intent.plan_query(p, "Compare Alcazar vs Creta", [])
+    assert plan.intent == "model_comparison" and plan.vehicles == ["Alcazar", "Creta"]
+    assert p.chat_calls == []

@@ -41,6 +41,9 @@ class Settings(BaseSettings):
 
     VISION_OCR_FALLBACK: bool = True
     RETRIEVAL_TOP_K: int = 8
+    # true: one JSON-mode LLM call plans each question (falls back to heuristics on failure);
+    # false: heuristic planner only, halving LLM calls (useful on rate-limited free tiers).
+    LLM_QUERY_PLANNER: bool = True
     LLM_TIMEOUT_SECONDS: int = 60
     MAX_MESSAGE_CHARS: int = Field(default=2000)
 

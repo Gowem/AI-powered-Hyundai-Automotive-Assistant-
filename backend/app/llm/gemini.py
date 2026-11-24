@@ -13,8 +13,9 @@ from app.llm.base import ChatMessage, LLMError
 from app.llm.retry import retrying
 
 EMBED_BATCH = 50
-# Chat calls retry only transient server errors; quota (429) / missing model (404) switch model at once.
-CHAT_RETRY_CODES = frozenset({500, 502, 503, 504})
+# Chat calls retry only transient server errors; overload (503), quota (429) and missing model (404)
+# switch to the next model at once.
+CHAT_RETRY_CODES = frozenset({500, 502, 504})  # 503 (overloaded) switches model straight away
 FALLBACK_ROUNDS = 2  # if every model is busy, pause and walk the chain once more
 ROUND_PAUSE_SECONDS = 8.0
 logger = logging.getLogger("app.llm")
